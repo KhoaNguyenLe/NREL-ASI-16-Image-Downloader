@@ -1,0 +1,18 @@
+name: mrd
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pandas>=2.0
+  - numpy>=2.0
+  - requests
+  - pillow
+  - matplotlib>=3.8
+  - pip
+  - pip:
+    - huggingface_hub>=0.20.0
+    - python-dotenv
+    - torch>=2.0
+    - torchvision>=0.15

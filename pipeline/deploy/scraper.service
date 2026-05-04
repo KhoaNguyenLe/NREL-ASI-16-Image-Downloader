@@ -1,0 +1,29 @@
+[Unit]
+Description=NREL SRRL ASI-16 Sky Image Scraper
+Documentation=https://huggingface.co/datasets/knl2366/NREL_Sky_Imagery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=exouser
+WorkingDirectory=/home/exouser/srrl-pipeline/resources
+ExecStart=/usr/bin/python3 /home/exouser/srrl-pipeline/resources/scraper.py
+Restart=always
+RestartSec=30
+
+# Environment
+Environment=SRRL_IMAGE_DIR=/media/volume/Primary-Dataset
+EnvironmentFile=-/home/exouser/.env
+
+# Logging
+StandardOutput=append:/var/log/srrl/scraper.log
+StandardError=append:/var/log/srrl/scraper.log
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/media/volume/Primary-Dataset /var/log/srrl
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,66 @@
+# === Credentials ===
+.env
+env
+
+# === Runtime artifacts ===
+pipeline/uploaded_days.txt
+pipeline/scraper.log
+
+# === Legacy (prevent accidental add) ===
+Scripts/
+
+# === Project-specific exclusions ===
+
+# Private project management files
+CLAUDE.md
+TODO.md
+
+# Original draft (superseded by paper.tex)
+Draft Forecasting Dataset.docx
+
+# Jetstream2 allocation docs (contain CVs, personal info)
+Jetstream allocation/
+Jetstream2 Allocation Request/
+
+# Dataset directory (large binary data — hosted on HuggingFace)
+Dataset/
+
+# === LaTeX build artifacts ===
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+
+# DMLR template clone (has its own .git)
+Manuscript/dmlr-template/
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# === OS files ===
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+*.log
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo

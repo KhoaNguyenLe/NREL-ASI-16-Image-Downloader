@@ -1,0 +1,9 @@
+huggingface_hub>=0.20.0
+pandas>=2.0
+numpy>=2.0
+requests>=2.28
+Pillow>=9.0
+matplotlib>=3.8
+python-dotenv>=1.0
+torch>=2.0
+torchvision>=0.15

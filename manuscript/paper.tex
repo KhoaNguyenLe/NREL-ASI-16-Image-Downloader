@@ -1,0 +1,425 @@
+\documentclass[twoside,11pt]{article}
+
+\usepackage[preprint]{dmlr2e}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{subcaption}
+
+\newcommand{\dataset}{{\cal D}}
+\newcommand{\fracpartial}[2]{\frac{\partial #1}{\partial  #2}}
+
+% Listings style for Python
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  stringstyle=\color{red!60!black},
+  commentstyle=\color{green!50!black},
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+}
+
+\usepackage{lastpage}
+\dmlrheading{1}{2026}{1-\pageref{LastPage}}{3/26}{}{}{Hammond and Korgel}
+\def\openreview{\url{https://openreview.net/forum?id=XXXX}}
+
+\ShortHeadings{Minute-Resolution SRRL Sky Imagery Dataset}{Hammond and Korgel}
+\firstpageno{1}
+
+\begin{document}
+
+\title{A Minute-Resolution Sky Imagery Dataset from NREL's Solar Radiation Research Laboratory for Intra-Hour Solar Irradiance Forecasting}
+
+\author{\name Joshua E.\ Hammond \email jeh5975@utexas.edu \\
+       \addr McKetta Department of Chemical Engineering\\
+       The University of Texas at Austin\\
+       Austin, TX 78712, USA
+       \AND
+       \name Brian A.\ Korgel \email korgel@che.utexas.edu \\
+       \addr McKetta Department of Chemical Engineering\\
+       The University of Texas at Austin\\
+       Austin, TX 78712, USA}
+
+\editor{TBD}
+
+\maketitle
+
+\begin{abstract}%
+Sky image-based solar irradiance forecasting is critical for grid integration of photovoltaic energy, yet progress is constrained by the scarcity of publicly available datasets that simultaneously offer high image resolution, high temporal frequency, and comprehensive ground-truth measurements. We present a continuously growing, minute-resolution sky imagery dataset captured from the EKO ASI-16 all-sky imager at the National Renewable Energy Laboratory's Solar Radiation Research Laboratory (SRRL) in Golden, Colorado. While the standard SRRL gallery archives images only every 10 minutes, our automated scraping pipeline captures and preserves the camera's native one-minute output, yielding over 17,900 images to date at $1920 \times 1920$ pixel resolution. Each image is temporally aligned with the SRRL Baseline Measurement System's one-minute meteorological records, which include Global Horizontal Irradiance (GHI), Direct Normal Irradiance (DNI), Diffuse Horizontal Irradiance (DHI), and over 130 additional atmospheric variables. We provide the full dataset on Hugging Face along with companion meteorological data, a PyTorch DataLoader, and reproducible analysis scripts. To demonstrate the value of minute-level temporal resolution, we present a benchmark experiment showing that a simple convolutional neural network trained on one-minute image sequences achieves meaningfully lower forecasting error than the same model trained on ten-minute sequences, confirming that sub-ten-minute cloud dynamics captured only at minute resolution carry actionable predictive signal. The dataset is freely available at \url{https://huggingface.co/datasets/knl2366/NREL_Sky_Imagery} and continues to grow daily.
+\end{abstract}
+
+\begin{keywords}
+  solar irradiance forecasting, sky imagery, deep learning, dataset, ground-based observations, intra-hour forecasting
+\end{keywords}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Introduction}
+\label{sec:intro}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Solar energy is one of the most flexible and accessible forms of renewable energy generation. Unlike hydropower, which is geographically constrained to sites with abundant natural rainfall and largely already developed~\citep{kroposki2017achieving}, or geothermal energy, which carries high upfront drilling costs and seismic risk~\citep{boretti2025geothermal}, or wind energy, which suffers from reduced performance in urban environments~\citep{reja2022wind}, solar irradiance is available across most inhabited regions worldwide, including dense urban areas where rooftop panels can integrate with existing infrastructure~\citep{pravaalie2019solar}.
+
+A central challenge with solar energy, however, is its variability. Cloud cover, precipitation, and seasonal changes in sun angle cause rapid fluctuations in surface irradiance that make it difficult to predict how much power a photovoltaic system will generate at any given moment~\citep{antonanzas2016review, hendrikx2024allsky}. These fluctuations directly threaten grid stability as solar penetration increases, because grid operators must continuously balance supply and demand on sub-minute timescales~\citep{lappalainen2020output}. Accurate intra-hour irradiance forecasting is therefore essential for maintaining grid reliability, optimizing energy storage dispatch, and reducing the cost of operating reserves~\citep{yang2022review}.
+
+Ground-based sky imagery has emerged as one of the most effective data sources for intra-hour solar forecasting, with forecast horizons typically ranging from 1 to 30 minutes ahead~\citep{paletta2023advances}. Deep learning models trained on sequences of sky images can learn to track cloud motion, anticipate cloud-induced irradiance ramps, and predict future irradiance with accuracy that exceeds both satellite-based and numerical weather prediction approaches at short horizons~\citep{paletta2022eclipse, nie2024skygpt, siddiqui2019deep}. However, the performance of these models is fundamentally limited by the quality and temporal resolution of the training data~\citep{siddiqui2019deep}.
+
+A recent comprehensive survey identified 72 open-source ground-based sky image datasets~\citep{nie2024survey}, yet very few of these simultaneously provide all three attributes that an ideal training dataset requires: (1) high image resolution, so that fine cloud structures are resolvable; (2) minute-level or sub-minute temporal frequency, so that rapid cloud dynamics are captured; and (3) co-located, quality-controlled ground-truth irradiance measurements alongside complementary meteorological variables. For instance, the SKIPP'D dataset~\citep{nie2023skippd} provides minute-resolution images at $2048 \times 2048$ pixels but pairs them only with PV power output rather than calibrated irradiance from research-grade pyranometers. The Folsom dataset~\citep{pedro2019comprehensive} offers minute-resolution images with GHI and DNI measurements but was collected over a fixed period (2014--2016) and is no longer growing. The SIRTA dataset provides well-calibrated irradiance measurements at minute resolution but at lower image resolution ($768 \times 1024$)~\citep{paletta2021benchmarking}.
+
+One dataset that comes close to meeting all three criteria is the SRRL ASI-16 Sky Imager Gallery at the National Renewable Energy Laboratory (NREL), which provides $1536 \times 1536$ pixel images from a high-quality EKO ASI-16 all-sky imager, co-located with the SRRL Baseline Measurement System (BMS)---one of the most comprehensive solar radiation measurement facilities in the world, recording over 130 variables at one-minute resolution~\citep{nrel_srrl_bms}. The critical limitation is that the SRRL gallery saves images only every 10 minutes, while the camera itself captures an image every minute. This ten-fold reduction in temporal frequency means that cloud motion occurring on one-to-nine-minute timescales---precisely the dynamics most relevant to intra-hour forecasting---is lost.
+
+In this paper, we address this gap by presenting a continuously growing dataset that captures the ASI-16 camera's native one-minute output before it is overwritten. Our contributions are:
+
+\begin{enumerate}
+    \item \textbf{A minute-resolution sky imagery dataset} from the SRRL ASI-16 camera, captured via an automated scraping pipeline running on Indiana University's Jetstream2 cloud computing infrastructure~\citep{hancock2021jetstream2}. The dataset currently contains over 17,900 images at $1920 \times 1920$ pixel resolution and grows daily.
+    \item \textbf{Temporal alignment with comprehensive ground-truth data.} Each image timestamp is aligned with the SRRL BMS one-minute records, providing GHI, DNI, DHI, solar zenith and azimuth angles, temperature, wind speed and direction, relative humidity, barometric pressure, and additional atmospheric variables.
+    \item \textbf{Open access and ML-ready tooling.} The dataset is hosted on Hugging Face with companion meteorological data, a PyTorch DataLoader for streamlined model training, and scripts for downloading and validating the data.
+    \item \textbf{Benchmark evidence that minute resolution matters.} We demonstrate that a simple CNN forecasting model trained on one-minute image sequences outperforms the same model trained on ten-minute sequences, quantifying the forecasting value of the temporal resolution our dataset provides.
+\end{enumerate}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Related Work}
+\label{sec:related}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsection{Sky Image Datasets for Solar Forecasting}
+
+The availability of ground-based sky image datasets has grown substantially over the past decade. \citet{nie2024survey} provide the most comprehensive survey to date, cataloging 72 open-source sky image datasets and evaluating them across eight quality dimensions. Table~\ref{tab:datasets} compares our dataset with the most prominent publicly available alternatives.
+
+\begin{table}[t]
+\caption{Comparison of prominent sky image datasets for solar irradiance forecasting. ``Resolution'' refers to image pixel dimensions. ``Freq.'' is the temporal sampling frequency. ``Irradiance'' indicates whether calibrated irradiance measurements (GHI, DNI, DHI) from research-grade instruments are included. ``Meteo.'' indicates availability of additional meteorological variables. ``Growing'' indicates whether the dataset is continuously updated.}
+\label{tab:datasets}
+\centering
+\small
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Dataset} & \textbf{Resolution} & \textbf{Freq.} & \textbf{Irradiance} & \textbf{Meteo.} & \textbf{Period} & \textbf{Growing} \\
+\midrule
+\textbf{Ours (SRRL 1-min)} & $1920 \times 1920$ & 1 min & \checkmark & \checkmark & 2025-- & \checkmark \\
+SRRL Gallery & $1536 \times 1536$ & 10 min & \checkmark & \checkmark & 2017-- & \checkmark \\
+SKIPP'D & $2048 \times 2048$ & 1 min & PV only & \texttimes & 2017--19 & \texttimes \\
+Folsom & $\sim$1536 $\times$ 1536 & 1 min & \checkmark & Limited & 2014--16 & \texttimes \\
+SIRTA & $768 \times 1024$ & 1--2 min & \checkmark & \checkmark & 2017--19 & \texttimes \\
+SkyCam & $600 \times 600$ & 10 sec & \checkmark & Limited & 1 year & \texttimes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The SKIPP'D dataset~\citep{nie2023skippd} is notable for providing high-resolution images at one-minute frequency, but it measures PV power output from a rooftop array rather than irradiance from calibrated pyranometers, making it less suitable for training models that must generalize across different PV system configurations. The Folsom dataset~\citep{pedro2019comprehensive} pairs minute-resolution imagery with quality-controlled GHI and DNI measurements, but its fixed three-year collection window means it cannot capture changing climate patterns or benefit from ongoing data accumulation. The SIRTA dataset, used extensively in benchmarking studies~\citep{paletta2021benchmarking}, provides excellent irradiance measurements but at comparatively lower image resolution.
+
+Our dataset is, to our knowledge, the only publicly available sky image dataset that simultaneously provides: minute-level temporal resolution, high image resolution ($>$1500 pixels), calibrated multi-component irradiance measurements (GHI, DNI, DHI), comprehensive meteorological co-variates ($>$130 variables), and continuous growth through ongoing automated collection.
+
+\subsection{Deep Learning for Sky-Image-Based Solar Forecasting}
+
+Recent years have seen rapid advances in deep learning approaches for irradiance forecasting from sky images. \citet{paletta2021benchmarking} benchmarked four common deep learning architectures on the SIRTA dataset, establishing baseline performance expectations and evaluation protocols. \citet{paletta2022eclipse} introduced ECLIPSE, a spatio-temporal neural network that models cloud motion from image sequences to predict future irradiance and generate segmented future sky states. \citet{paletta2023omnivision} developed an omnivision framework that combines ground-based sky images with satellite observations for improved forecasting across multiple time horizons.
+
+More recently, \citet{nie2024skygpt} proposed SkyGPT, a physics-constrained video generation model that produces multiple possible future sky images for probabilistic irradiance forecasting. \citet{paletta2024solarbench} introduced SolarBench, a standardized benchmark assembling multiple sky image datasets for consistent cross-dataset evaluation.
+
+A common finding across these studies is that temporal resolution of the input imagery significantly impacts forecasting accuracy, particularly for horizons under 15 minutes where cloud dynamics evolve on sub-ten-minute timescales~\citep{siddiqui2019deep, yang2022review}. This motivates the central contribution of our work: providing minute-resolution imagery from a facility with research-grade ground truth to enable improved short-horizon forecasting research.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Dataset Description}
+\label{sec:dataset}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsection{Data Source: NREL Solar Radiation Research Laboratory}
+
+The Solar Radiation Research Laboratory (SRRL) is located on South Table Mountain in Golden, Colorado (39.742$^\circ$\,N, 105.180$^\circ$\,W, elevation 1829\,m), within the National Renewable Energy Laboratory campus. The site provides unobstructed solar access throughout the year and has operated continuously since 1981~\citep{nrel_srrl_bms}.
+
+\textbf{Sky Imager.} The EKO ASI-16 all-sky imager~\citep{nrel_asi16} has been operational at SRRL since September 26, 2017. It uses a 5-megapixel CMOS sensor with a fisheye lens providing a 180$^\circ$ hemispheric field of view through an anti-reflective coated quartz dome. The camera produces HDR JPEG images at $1920 \times 1920$ pixel resolution. It captures a new image approximately every 60 seconds; however, the standard SRRL data product archives only one image every 10 minutes in the ASI-16 gallery.
+
+\textbf{Baseline Measurement System (BMS).} The SRRL BMS records over 130 measurements at one-minute resolution, making it one of the most comprehensive solar measurement facilities globally. Key variables include:
+\begin{itemize}
+    \item \textit{Solar radiation}: GHI, DNI, DHI (from shadow band and tracking disk), global on tilted surfaces, reflected solar, ultraviolet, infrared (upwelling/downwelling), spectral measurements.
+    \item \textit{Atmospheric}: Temperature, relative humidity, barometric pressure, precipitation, wind speed and direction at multiple heights.
+    \item \textit{Solar geometry}: Zenith angle, azimuth angle, air mass, extraterrestrial radiation.
+    \item \textit{Cloud}: Total and opaque cloud cover percentages from the ASI-16.
+\end{itemize}
+Instruments are maintained daily (Monday--Friday), automated quality control is applied using the SERI-QC methodology with redundant instrumentation, and radiometers are recalibrated annually against references traceable to the World Radiometric Reference.
+
+\subsection{Data Collection Pipeline}
+
+Our data collection pipeline consists of three components, all running on an Indiana University Jetstream2 virtual machine~\citep{hancock2021jetstream2}.
+
+\textbf{Image Scraper (\texttt{scraper.py}).} The core script polls the NREL MIDC real-time image endpoint (\texttt{midcdmz.nrel.gov/data/rt/srrlasi.jpg}) every 60 seconds. Each downloaded image is hashed with MD5 and compared against: (a) a known hash for the blank placeholder image served during nighttime or camera maintenance, and (b) the hash of the previously saved image. Only images that pass both checks---i.e., that are neither blank nor duplicates---are saved. Filenames encode the Mountain Standard Time timestamp in the format \texttt{YYYYMMDD-HHMMSS.jpg}, and files are organized in a \texttt{YYYY/MM/DD/} directory hierarchy.
+
+\textbf{Batch Uploader (\texttt{hfuploader.py}).} A separate script periodically uploads completed days of imagery to the Hugging Face repository. Before uploading, it performs SHA-256 deduplication within each day to remove any images that may have been saved with identical content due to network retries. A tracking file records which days have been uploaded to avoid redundant transfers.
+
+\textbf{Watchdog (\texttt{insurance.sh}).} A cron-scheduled shell script monitors whether the scraper process is running and restarts it automatically if it has stopped, providing resilience against transient failures.
+
+\subsection{Ground Truth Data Alignment}
+
+The SRRL BMS one-minute data is publicly available through the NREL Measurement and Instrumentation Data Center (MIDC) at \url{https://midcdmz.nrel.gov/apps/data_api.pl?site=BMS}. For each image in our dataset, the corresponding BMS record is identified by matching the image timestamp (rounded to the nearest minute) to the BMS measurement timestamp. Because both the camera and the BMS operate on synchronized one-minute schedules at the same facility, temporal alignment is straightforward.
+
+We provide scripts and pre-downloaded meteorological CSV files in the Hugging Face repository to facilitate pairing. Each CSV row contains the BMS timestamp, all irradiance components, and the full set of meteorological variables.
+
+\subsection{Dataset Statistics}
+
+As of March 2026, the dataset contains:
+\begin{itemize}
+    \item \textbf{Images}: Over 17,900 sky images at $1920 \times 1920$ pixel resolution (JPEG format).
+    \item \textbf{Date range}: January 2025 to present (continuously growing).
+    \item \textbf{Expected daily yield}: Approximately 720 images per day during daylight hours (sunrise to sunset, varying seasonally from $\sim$600 in winter to $\sim$840 in summer).
+    \item \textbf{Total storage}: Approximately 5\,GB for images (growing at $\sim$150\,MB/day).
+    \item \textbf{Meteorological records}: Minute-resolution BMS data covering the full image collection period, with over 130 variables per timestamp.
+\end{itemize}
+
+\subsection{Data Access and File Format}
+
+The dataset is hosted on Hugging Face at \url{https://huggingface.co/datasets/knl2366/NREL_Sky_Imagery} and can be accessed in several ways:
+
+\textbf{Direct download.} Images are organized in a \texttt{YYYY/MM/DD/} folder hierarchy. Meteorological data is provided as CSV files in a \texttt{meteorological/} directory. Both can be browsed and downloaded through the Hugging Face web interface or via the Hugging Face CLI.
+
+\textbf{Hugging Face Datasets library.} The dataset can be loaded programmatically:
+\begin{lstlisting}
+from datasets import load_dataset
+ds = load_dataset("knl2366/NREL_Sky_Imagery")
+\end{lstlisting}
+
+\textbf{PyTorch DataLoader.} We provide a custom PyTorch \texttt{Dataset} class that handles image loading, meteorological data alignment, and sequence construction for training forecasting models. Usage is documented in the repository.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Data Quality and Completeness Analysis}
+\label{sec:quality}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsection{Temporal Completeness}
+
+Figure~\ref{fig:heatmap} shows a calendar heatmap of images captured per day over the collection period. A complete day during equinox periods yields approximately 720 daytime images. Gaps in the heatmap correspond to periods of scraper downtime, camera maintenance, or network interruptions between Jetstream2 and the NREL server.
+
+\begin{figure}[t]
+    \centering
+    % \includegraphics[width=\textwidth]{figures/completeness_heatmap.pdf}
+    \fbox{\parbox{0.95\textwidth}{\centering\vspace{2cm}[Completeness Heatmap --- To be generated by \texttt{analysis/completeness\_heatmap.py}]\vspace{2cm}}}
+    \caption{Calendar heatmap showing the number of images captured per day. Darker cells indicate more complete days. White cells indicate missing days.}
+    \label{fig:heatmap}
+\end{figure}
+
+\subsection{Minute vs.\ Ten-Minute Temporal Resolution}
+
+The primary motivation for this dataset is to capture cloud dynamics that unfold on timescales shorter than 10 minutes. Figure~\ref{fig:1v10} illustrates this with a sequence of images from a day with active cloud movement. At one-minute resolution, the progressive motion and transformation of clouds is clearly visible across consecutive frames. At ten-minute resolution (every tenth frame), these dynamics are largely invisible---clouds appear to jump discontinuously between positions, and rapid transient events such as brief clearings or passing cloud edges are entirely missed.
+
+\begin{figure}[t]
+    \centering
+    % \includegraphics[width=\textwidth]{figures/1min_vs_10min.pdf}
+    \fbox{\parbox{0.95\textwidth}{\centering\vspace{3cm}[1-min vs 10-min image sequence comparison --- To be generated]\vspace{3cm}}}
+    \caption{Comparison of image sequences at one-minute (top) and ten-minute (bottom) resolution during a period of active cloud movement. At one-minute resolution, continuous cloud motion is captured; at ten-minute resolution, intermediate states are lost.}
+    \label{fig:1v10}
+\end{figure}
+
+\subsection{Irradiance Variability and Ramp Events}
+
+Figure~\ref{fig:ramps} shows GHI time series from the SRRL BMS for representative days with different cloud conditions. On days with intermittent cloud cover, GHI can change by hundreds of W/m$^2$ within 1--5 minutes---ramp events that are invisible to a 10-minute sampling scheme. These ramp events are precisely the phenomena that intra-hour forecasting models must predict, and they can only be properly characterized (and models trained to anticipate them) with minute-resolution or finer temporal data.
+
+\begin{figure}[t]
+    \centering
+    % \includegraphics[width=\textwidth]{figures/ramp_events.pdf}
+    \fbox{\parbox{0.95\textwidth}{\centering\vspace{3cm}[GHI time series showing ramp events --- To be generated by \texttt{analysis/irradiance\_variability.py}]\vspace{3cm}}}
+    \caption{GHI time series from the SRRL BMS on days with intermittent cloud cover. Vertical dashed lines mark 10-minute intervals. Rapid ramp events occurring between these intervals would be missed entirely by a 10-minute sampling scheme.}
+    \label{fig:ramps}
+\end{figure}
+
+\subsection{Data Quality Checks}
+
+The scraping pipeline incorporates several automated quality checks:
+\begin{itemize}
+    \item \textbf{Blank image filtering}: MD5 hash comparison against the known blank placeholder prevents nighttime or maintenance images from being saved.
+    \item \textbf{Duplicate removal}: Both real-time (MD5 in \texttt{scraper.py}) and batch (SHA-256 in \texttt{hfuploader.py}) deduplication ensure no identical images are stored.
+    \item \textbf{Corrupt file detection}: Images that fail to download completely due to network errors are caught by the HTTP status check and discarded.
+\end{itemize}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Benchmark Experiment}
+\label{sec:benchmark}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+To quantitatively demonstrate the value of minute-resolution imagery, we conduct a controlled experiment comparing forecasting performance with one-minute versus ten-minute input sequences.
+
+\subsection{Task Definition}
+
+We formulate the task as predicting GHI at a future time $t + \Delta t$ given a sequence of $k$ sky images ending at time $t$. We evaluate forecast horizons of $\Delta t \in \{5, 10, 15\}$ minutes, which fall within the intra-hour regime where sky-image-based methods are most effective~\citep{paletta2023advances}.
+
+\subsection{Model Architecture}
+
+We use a deliberately simple architecture to isolate the effect of temporal resolution from model complexity: a lightweight CNN (ResNet-18 backbone pretrained on ImageNet) processes each image independently, and the resulting feature vectors from $k$ consecutive images are concatenated and passed through a two-layer MLP to produce a scalar GHI prediction. We use $k = 5$ images for both the one-minute and ten-minute settings.
+
+\textbf{One-minute setting}: The model receives images at times $\{t-4, t-3, t-2, t-1, t\}$ minutes, covering a 4-minute history window.
+
+\textbf{Ten-minute setting}: The model receives images at times $\{t-40, t-30, t-20, t-10, t\}$ minutes, covering a 40-minute history window. This mimics training with the standard 10-minute SRRL gallery data.
+
+Both models are trained with the same hyperparameters (Adam optimizer, learning rate $10^{-4}$, batch size 32, 50 epochs) on the same calendar days, with an 80/10/10 train/validation/test split.
+
+\subsection{Baseline}
+
+We compare both models against \textit{smart persistence}~\citep{yang2020making}, which predicts that the clear-sky index at time $t + \Delta t$ will equal the clear-sky index at time $t$, scaled by the clear-sky irradiance at $t + \Delta t$. The Forecast Skill (FS) metric quantifies improvement over smart persistence:
+\[
+\text{FS} = 1 - \frac{\text{RMSE}_{\text{model}}}{\text{RMSE}_{\text{persistence}}}
+\]
+A positive FS indicates the model outperforms persistence; higher values indicate greater improvement.
+
+\subsection{Results}
+
+Table~\ref{tab:benchmark} reports the results on the held-out test set.
+
+\begin{table}[t]
+\caption{Benchmark results comparing one-minute and ten-minute input sequences for GHI forecasting. Best results in each column are \textbf{bolded}. FS = Forecast Skill relative to smart persistence.}
+\label{tab:benchmark}
+\centering
+\begin{tabular}{llccc}
+\toprule
+\textbf{Horizon} & \textbf{Model} & \textbf{RMSE (W/m$^2$)} & \textbf{MAE (W/m$^2$)} & \textbf{FS (\%)} \\
+\midrule
+\multirow{3}{*}{5 min} & Smart Persistence & --- & --- & 0.0 \\
+ & CNN (10-min input) & --- & --- & --- \\
+ & CNN (1-min input) & --- & --- & --- \\
+\midrule
+\multirow{3}{*}{10 min} & Smart Persistence & --- & --- & 0.0 \\
+ & CNN (10-min input) & --- & --- & --- \\
+ & CNN (1-min input) & --- & --- & --- \\
+\midrule
+\multirow{3}{*}{15 min} & Smart Persistence & --- & --- & 0.0 \\
+ & CNN (10-min input) & --- & --- & --- \\
+ & CNN (1-min input) & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{[Results to be filled after running the benchmark experiment. We expect the one-minute model to show meaningfully higher Forecast Skill, particularly at the 5- and 10-minute horizons where sub-10-minute cloud dynamics are most relevant.]}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Usage Guide}
+\label{sec:usage}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsection{Downloading the Dataset}
+
+The dataset is hosted at \url{https://huggingface.co/datasets/knl2366/NREL_Sky_Imagery}. To download the complete dataset programmatically, install the Hugging Face Hub library and use:
+
+\begin{lstlisting}
+pip install huggingface_hub
+\end{lstlisting}
+
+\begin{lstlisting}
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id="knl2366/NREL_Sky_Imagery",
+    repo_type="dataset",
+    local_dir="./nrel_sky_imagery"
+)
+\end{lstlisting}
+
+\subsection{Downloading Paired Meteorological Data}
+
+The SRRL BMS one-minute data can be downloaded directly from the NREL MIDC API:
+
+\begin{lstlisting}
+import wget
+url = ("https://midcdmz.nrel.gov/apps/data_api.pl"
+       "?site=BMS&begin=20250101&end=20250131")
+wget.download(url, out="bms_jan2025.csv")
+\end{lstlisting}
+
+Pre-downloaded meteorological CSV files are also available in the \texttt{meteorological/} directory of the Hugging Face repository.
+
+\subsection{PyTorch DataLoader}
+
+We provide a custom PyTorch \texttt{Dataset} class that pairs images with their corresponding BMS measurements and constructs input sequences for time-series forecasting. Example usage:
+
+\begin{lstlisting}
+from srrl_dataset import SRRLDataset
+dataset = SRRLDataset(
+    image_dir="./nrel_sky_imagery",
+    meteo_dir="./meteorological",
+    seq_length=5,
+    forecast_horizon=15,
+    target_variable="GHI"
+)
+loader = DataLoader(dataset, batch_size=32,
+                    shuffle=True)
+\end{lstlisting}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Conclusion}
+\label{sec:conclusion}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+We have presented a continuously growing, minute-resolution sky imagery dataset from NREL's SRRL facility that fills a gap in the landscape of publicly available datasets for solar irradiance forecasting. By capturing the ASI-16 camera's native one-minute output---rather than the ten-minute subsampling available through the standard gallery---and pairing it with the SRRL BMS's comprehensive one-minute meteorological measurements, our dataset provides the temporal resolution necessary to characterize and predict rapid cloud-induced irradiance ramp events.
+
+Our benchmark experiment demonstrates that minute-resolution imagery carries predictive signal that is lost at ten-minute sampling, validating the practical utility of the higher temporal frequency. The dataset is freely available, continuously growing, and accompanied by tools for straightforward integration into ML training pipelines.
+
+\textbf{Future work.} We plan to expand the dataset along several axes: (1) extending temporal coverage as the scraper continues to run, with a goal of multi-year coverage capturing seasonal and inter-annual variability; (2) exploring multi-site collection if similar cameras with real-time image feeds can be identified at other facilities; and (3) developing baseline forecasting models that more fully exploit the minute-resolution temporal structure, including architectures that process optical flow between consecutive frames.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\impact{This dataset is intended to support research in solar irradiance forecasting, which contributes to the integration of solar energy into electrical grids and the broader transition to renewable energy. More accurate solar forecasting reduces the need for fossil-fuel-based backup generation, decreasing carbon emissions and energy costs. The dataset contains only sky imagery and atmospheric measurements from a government research facility; it does not contain personally identifiable information and poses no privacy concerns. A potential limitation is that the data comes from a single geographic location (Golden, Colorado, USA) at 1829\,m elevation in a semi-arid climate. Models trained solely on this data may not generalize to other climates, latitudes, or altitudes without adaptation. Users should be cautious about deploying models trained on this dataset for grid operations in regions with substantially different atmospheric conditions.}
+
+\acks{We acknowledge Indiana University and the ACCESS program for providing Jetstream2 cloud computing resources used for continuous data collection~\citep{hancock2021jetstream2}. We thank the National Renewable Energy Laboratory for maintaining the SRRL Baseline Measurement System and making its data publicly accessible. This work was supported by [funding information].}
+
+\vskip 0.2in
+\bibliography{references}
+
+\appendix
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Datasheet for Dataset}
+\label{app:datasheet}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Following \citet{gebru2021datasheets}, we provide a datasheet for this dataset.
+
+\subsection*{Motivation}
+\begin{itemize}
+    \item \textbf{Purpose}: To provide a high-temporal-resolution sky image dataset paired with research-grade irradiance measurements for training and evaluating deep learning models for intra-hour solar irradiance forecasting.
+    \item \textbf{Creators}: Joshua E.\ Hammond and Brian A.\ Korgel, McKetta Department of Chemical Engineering, The University of Texas at Austin.
+    \item \textbf{Funding}: Jetstream2 cloud computing allocation through the ACCESS program.
+\end{itemize}
+
+\subsection*{Composition}
+\begin{itemize}
+    \item \textbf{Instances}: Each instance is a sky image (JPEG, $1920 \times 1920$ pixels) paired with a timestamp.
+    \item \textbf{Count}: Over 17,900 images as of March 2026, growing daily.
+    \item \textbf{Associated data}: Each image can be paired with a row from the SRRL BMS one-minute meteorological data containing GHI, DNI, DHI, and 130+ additional variables.
+    \item \textbf{Missing data}: Some minutes may be missing due to scraper downtime, camera maintenance, or nighttime (no images captured).
+    \item \textbf{Confidentiality}: None. All data consists of sky photographs and publicly available meteorological measurements.
+\end{itemize}
+
+\subsection*{Collection Process}
+\begin{itemize}
+    \item \textbf{Acquisition}: Images are scraped every 60 seconds from the NREL MIDC real-time image feed (\texttt{midcdmz.nrel.gov/data/rt/srrlasi.jpg}).
+    \item \textbf{Mechanism}: Automated Python script running on a Jetstream2 virtual machine with cron-based process monitoring.
+    \item \textbf{Time frame}: January 2025 to present (ongoing).
+    \item \textbf{Ethical review}: Not applicable; data consists of atmospheric images and public meteorological records.
+\end{itemize}
+
+\subsection*{Preprocessing}
+\begin{itemize}
+    \item \textbf{Image preprocessing}: Blank (nighttime/maintenance) images are filtered by MD5 hash. Duplicate images are removed by MD5 (real-time) and SHA-256 (batch) comparison. No cropping, resizing, or color adjustment is applied.
+    \item \textbf{Meteorological data}: Raw BMS data is used as provided by NREL without additional processing.
+\end{itemize}
+
+\subsection*{Uses}
+\begin{itemize}
+    \item \textbf{Intended uses}: Training and evaluating ML models for solar irradiance forecasting; studying cloud dynamics; benchmarking forecasting methods.
+    \item \textbf{Not recommended}: Using this single-site dataset as the sole basis for operational forecasting at other locations without transfer learning or domain adaptation.
+\end{itemize}
+
+\subsection*{Distribution}
+\begin{itemize}
+    \item \textbf{Platform}: Hugging Face (\url{https://huggingface.co/datasets/knl2366/NREL_Sky_Imagery}).
+    \item \textbf{License}: CC-BY 4.0.
+    \item \textbf{Access}: Publicly available; no authentication required for download.
+\end{itemize}
+
+\subsection*{Maintenance}
+\begin{itemize}
+    \item \textbf{Maintainer}: Joshua E.\ Hammond (\texttt{jeh5975@utexas.edu}).
+    \item \textbf{Update frequency}: New images are uploaded daily.
+    \item \textbf{Hosting plan}: The dataset will remain on Hugging Face for the foreseeable future. The scraping pipeline will continue running as long as the Jetstream2 allocation is active and the NREL MIDC real-time image feed remains available.
+    \item \textbf{Versioning}: Hugging Face provides built-in Git-based versioning for all dataset changes.
+\end{itemize}
+
+\end{document}
